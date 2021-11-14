@@ -2,30 +2,13 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const app = express();
+const mongo = require('mongodb');
+const mongoose = require('mongoose');
 const bodyParser = require('body-parser');
-const mongoose = require("mongoose");
-const mongodb = require("mongodb");
-const dns = require("dns");
-const { response } = require('express');
-
-mongoose.connect(process.env.MONG_URI, {userNewUrlParser: true, userUnifiedTopology:true});
-
-const Schema = mongoose.Schema;
-
-const urlSchema = new Schema({ 
-
-original_url: String,
-short_url: Number 
-
-});
-
-let url_dns = mongoose.model("url_dns", urlSchema);
-
 
 // Basic Configuration
 const port = process.env.PORT || 3000;
 
-app.use(bodyParser.json());
 app.use(cors());
 
 app.use('/public', express.static(`${process.cwd()}/public`));
@@ -39,69 +22,77 @@ app.get('/api/hello', function(req, res) {
   res.json({ greeting: 'hello API' });
 });
 
-let resObj ={}
-app.post("api/shorturl", app.use(bodyParser.urlencoded({extended: false}) , (req, res)=>{ 
-
-let inputUrl =req.body["url"]
-
-let urlRegex = new RegExp(/[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)?/gi)
-if(!inputUrl.match(urlRegex)){
-  response.json({error: 'Invalid URL'})
-  return
-}
-
-resObj['orignal_url'] = inputUrl
-
-let intputShort = 1;
-
-url_dns.findOne({})
-  .sort({short: 'desc'})
-  .exec((error, result)=> { 
-
-    if(!error && result != undefined){ 
-      inputUrl =result.short +1
-    }
-
-    if(!error){ 
-      url_dns.findOneAndUpdate({original: inputUrl},
-        {original: inputUrl, short: inputUrl},
-        {new: true, upsert: true},
-        (error, saveUrl)=>{ 
-
-          if(!error){
-           resObj["short_url"] = saveUrl.short
-           res.json(resObj) 
-          }
-
-        })
-    }
-
-
-
-
-  })
-
-
-  
-}) )
-
-app.get('/api/shorturl/:input', function(request, response){ 
-  let input = request.params.input
-
-  url_dns.findOne({short: input}, (error, result)=>{ 
-    if(!error&&result != undefined){ 
-      response.redirect(result.original)
-    }else{ 
-      response.json('URL not found')
-    }
-  })
-
-
-})
-
-
-
-
 app.listen(port, function() {
   console.log(`Listening on port ${port}`);
 });
+
+const mySecret = process.env['MONGO_URI']
+
+mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+
+let urlSchema = new mongoose.Schema({
+  original : {type: String, required: true},
+  short : Number
+})
+
+let Url = mongoose.model('Url', urlSchema)
+
+app.use(bodyParser.urlencoded({ extended: false}))
+
+app.use(bodyParser.json())
+
+let responseObject = {}
+app.post('/api/shorturl', async (request, response) => {
+  console.log('post');
+  console.log(JSON.stringify(request.body));
+  console.log(JSON.stringify(request.params));
+  console.log(JSON.stringify(request.query));
+
+  let inputUrl = request.body.url
+
+  let urlRegex = new RegExp(/^(?:(?:https?|ftp):\/\/)?(?:(?!(?:10|127)(?:\.\d{1,3}){3})(?!(?:169\.254|192\.168)(?:\.\d{1,3}){2})(?!172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})(?:[1-9]\d?|1\d\d|2[01]\d|22[0-3])(?:\.(?:1?\d{1,2}|2[0-4]\d|25[0-5])){2}(?:\.(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-4]))|(?:(?:[a-z\u00a1-\uffff0-9]-*)*[a-z\u00a1-\uffff0-9]+)(?:\.(?:[a-z\u00a1-\uffff0-9]-*)*[a-z\u00a1-\uffff0-9]+)*(?:\.(?:[a-z\u00a1-\uffff]{2,})))(?::\d{2,5})?(?:\/\S*)?$/)
+  
+  if(!inputUrl.match(urlRegex)){
+    response.json({error: 'invalid url'})
+    return
+  }
+
+  responseObject['original_url'] = inputUrl
+  
+  let inputShort = 1
+  
+  Url.findOne({})
+        .sort({short: 'desc'})
+        .exec((error, result) => {
+          if(!error && result != undefined){
+            inputShort = result.short + 1
+          }
+          if(!error){
+            Url.findOneAndUpdate(
+              {original: inputUrl},
+              {original: inputUrl, short: inputShort},
+              {new: true, upsert: true },
+              (error, savedUrl) => {
+                if(!error){
+                  responseObject['short_url'] = savedUrl.short
+                  console.log(responseObject)
+                  return response.json(responseObject)
+                }
+              }
+            )
+          }
+  })
+    console.log('hello');
+})
+
+app.get('/api/shorturl/:input', (request, response) => {
+  let input = request.params.input
+
+  Url.findOne({short: input}, (error, result) => {
+    if(!error && result != undefined){
+      response.redirect(result.original)
+    }else{
+      response.json('URL not found')
+    }
+  })
+})
